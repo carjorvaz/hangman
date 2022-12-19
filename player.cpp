@@ -26,13 +26,19 @@ using namespace std;
  * Se houver tempo, fazer o comando exit quando se faz ^C.
  */
 
+// TODO fazer função que lê uma palavra e um espaço, de um socket TCP para usar
+// no send_message
+// TODO do scoreboard, praticamente só falta escrever o ficheiro
 // TODO ao ler response, fazer:
+// TODO fazer README
+// TODO fazer autoavaliação e incluir no zip do projeto (junto com o README)
 // string <keyword> = response[0];
 // response.erase(response.begin());
 // TODO ter um símbolo de prompt? Por exemplo: >
 // TODO mostrar palavra quando se perde?
 // TODO nix-shell compile shortcut
-// TODO makefile
+// TODO makefile (essencial é que compile o código, o resto é de pouca
+// importância)
 // TODO mudar os response[0], response[1], etc. para os nomes que aparecem no
 // enunciado (n_letters e assim)
 // TODO usar string.length() e ver se letra está a <= z e A <= Z
@@ -45,6 +51,30 @@ using namespace std;
 // TODO buffer de tamanho maior para tcp?
 // TODO não ter lista de fds tcp, abrir e fechar tcp no comando, simplesmente;
 // ver se é preciso manter e falar sempre pelo mesmo tcp
+// TODO para as imagens tcp, fazer mallac de n bytes (ver qual é o tipo)
+// TODO fazer parte do TCP caracter a caracter
+string read_word(int fd) {
+  int n;
+  char buffer_tcp[1];
+  string word = "";
+  while (true) {
+    n = read(fd, buffer_tcp, 1);
+    if (n == -1) {
+      cout << "An error occurred." << endl;
+      exit(1); // TODO fazer outra coisa sem ser exit? Manter exit que são erros importantes
+    }
+
+    // TODO ver se é preciso ver outras coisas (whitespace)
+    if (buffer_tcp[0] == ' ') {
+      break;
+    } else {
+      word += buffer_tcp[0];
+    }
+  }
+
+  return word;
+}
+
 vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
                             bool is_tcp) {
   ssize_t n;
@@ -52,6 +82,8 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
   struct sockaddr_in addr;
   const int buffer_size = 128;
   char buffer[buffer_size];
+  vector<string> response;
+  addrlen = sizeof(addr);
 
   char *msg = strdup((str_msg + "\n").c_str());
   n = sendto(fd, msg, strlen(msg), 0, res->ai_addr, res->ai_addrlen);
@@ -63,73 +95,79 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
 
   free(msg);
 
-  string buffer_str = "";
-  addrlen = sizeof(addr);
   if (!is_tcp) {
     n = recvfrom(fd, buffer, buffer_size, 0, (struct sockaddr *)&addr,
                  &addrlen);
     if (n == -1) {
       cout << "An error occurred." << endl;
-      exit(1);
+      exit(1); // TODO fazer outra coisa sem ser exit?
     }
 
+    string buffer_str = "";
     buffer_str += string(buffer);
-  } else {
-    while (true) {
-      n = recvfrom(fd, buffer, buffer_size, 0, (struct sockaddr *)&addr,
-                   &addrlen);
-      if (n == -1) {
-        cout << "An error occurred." << endl;
-        exit(1);
-      } else if (n == 0) {
-        break;
-      }
+    stringstream response_stream(buffer_str);
+    string response_word;
 
-      buffer_str += string(buffer);
-    }
-  }
+    //
+    cout << endl << "Message: " << str_msg << endl;
+    //
 
-  stringstream response_stream(buffer_str);
-  string response_word;
-  vector<string> response;
-
-  //
-  cout << endl << "Message: " << str_msg << endl << "Response:";
-  //
-
-  response_stream >> response_word;
-  response.push_back(response_word);
-  if (response_word == string("RSB")) {
-    string status;
-    response_stream >> status;
-    response.push_back(status);
-
-    if (status == string("OK")) {
-      string Fname;
-      response_stream >> Fname;
-      response.push_back(Fname);
-
-      string Fsize;
-      response_stream >> Fsize;
-      response.push_back(Fsize);
-
-      string Fdata;
-      getline(response_stream, Fdata, '\0');
-      response.push_back(Fdata);
-    }
-  } else {
+    response_stream >> response_word;
+    response.push_back(response_word);
     while (response_stream >> response_word) {
       response.push_back(response_word);
-      //
-      cout << " " << response_word;
-      //
+    }
+  } else {
+    // TODO encher o response?
+    string response_word = read_word(fd);
+    response.push_back(response_word);
+
+    if (response_word == string("RSB")) {
+      string status = read_word(fd);
+      response.push_back(status);
+
+      if (status == string("OK")) { // TODO: função que lê character a character
+                                    // até ao espaço do socket tcp
+        string Fname = read_word(fd);
+        response.push_back(Fname);
+
+        string Fsize = read_word(fd);
+        response.push_back(Fsize);
+
+        // TODO experimentar continuar a ler para o mesmo buffer; ter
+        // preocupação de ler buffer size - 1 para o \0?
+        int scoreboard_buffer_size = stoi(Fsize) * sizeof(char);
+        char *scoreboard_buffer =
+            (char *)malloc(scoreboard_buffer_size); // TODO free
+        // getline(response_stream, remaining_buffer, '\0');
+
+        while (true) {
+          n = read(fd, scoreboard_buffer, scoreboard_buffer_size);
+          if (n == -1) {
+            printf("An error ocurred\n");
+            exit(1);
+          }
+
+          else if (n == 0) {
+            break;
+          }
+        }
+
+        string Fdata(scoreboard_buffer);
+        response.push_back(Fdata);
+      } else {
+        // TODO NOK?
+      }
     }
   }
 
-  //
-  cout << endl << endl;
-  //
-
+    //
+    cout << "Response: ";
+    for (string response_word : response) {
+      cout << response_word << " ";
+    }
+    cout << endl << endl;
+    //
 
   return response;
 }
@@ -208,7 +246,7 @@ int main(int argc, char **argv) {
       }
 
       for (char digit : PLID) {
-        if (!('0' <= digit <= '9')) {
+        if (!isdigit(digit)) {
           cout << "Invalid PLID provided. Please try again." << endl;
           exit(1);
         }
@@ -242,8 +280,8 @@ int main(int argc, char **argv) {
       line_stream >> letter;
 
       // TODO fazer estes checks com if else, etc. no resto (PLID e assim)
-      // TODO fazer confirmações de isalpha,etc. no guess (se todas as letras da
-      // palvra são letras, se a palavra tem o tamanho certo)
+      // TODO fazer confirmações de isalpha,etc. no guess (se todas as letras
+      // da palvra são letras, se a palavra tem o tamanho certo)
       if (letter.length() != 1) {
         cout << "Please enter one letter only. Try again." << endl << endl;
       } else if (!isalpha(letter[0])) {
@@ -312,6 +350,7 @@ int main(int argc, char **argv) {
           }
         } else {
           // TODO no attempts left; show final word?; finish the game (lose)
+          // TODO dá este erro se fizer jogada sem jogo começado, mudar
           cout << "You have no attempts left. Game over." << endl << endl;
         }
       }
@@ -401,11 +440,20 @@ int main(int argc, char **argv) {
           string Fdata = response[0];
           response.erase(response.begin());
 
-          n = write(1, Fdata.c_str(), stoi(Fsize));
-          if (n == -1) {
-            cout << "An error occurred" << endl << endl;
-          }
+          // TODO investigar porque é que este write às vezes se parte todo
+          // n = write(1, Fdata.c_str(), stoi(Fsize));
+          // if (n == -1) {
+          //   cout << "An error occurred" << endl << endl;
+          // }
+          cout << Fdata.substr(
+              0, stoi(Fsize)); // TODO fsize é bytes, vai correr mal; se
+                               // calhar fazer mesmo este em modo C
+
+          // TODO já sei, TCP não manda por ordem; corrigir lá em cima (como?)
         }
+
+        // TODO close fd, apagar lista de fds_tcp (não existe esse conceito no
+        // client, é abrir e fechar uma sessão TCP)
 
         fds_tcp.push_back(fd); // TODO apagar
       }
@@ -426,7 +474,8 @@ int main(int argc, char **argv) {
       string message = string("QUT " + PLID);
       vector<string> response = send_message(message, res_udp, fd_udp, false);
       cout << "Exiting..." << endl;
-      exit(0);
+      // exit(0); // TODO isto estava mal
+      break;
     } else {
       cout << "Unknown player command." << endl << endl;
     }
