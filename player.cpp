@@ -27,6 +27,7 @@ using namespace std;
  * Se houver tempo, fazer o comando exit quando se faz ^C.
  */
 
+// TODO apagar debug no send_message
 // TODO fazer/confirmar lógica do game_running; quando ganha/perde, ver resposta
 // que o state deve dar se nunca houve jogos
 // TODO ver se há hipóteses de mandar porcaria para o servidor (mensagens mal
@@ -91,8 +92,9 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
   struct sockaddr_in addr;
   const int buffer_size = 128;
   char buffer[buffer_size];
-  vector<string> response;
   addrlen = sizeof(addr);
+
+  vector<string> response;
 
   char *msg = strdup((str_msg + "\n").c_str());
   n = sendto(fd, msg, strlen(msg), 0, res->ai_addr, res->ai_addrlen);
@@ -218,7 +220,6 @@ int main(int argc, char **argv) {
   int max_errors = 0;
   bool game_running = false;
 
-  // TODO getopts?
   for (int i = 1; i < argc; i += 2) {
     if (strcmp(argv[i], "-n") == 0) {
       GSIP = argv[i + 1];
@@ -269,13 +270,13 @@ int main(int argc, char **argv) {
       line_stream >> PLID;
       if (PLID.length() != 6) {
         cout << "Invalid PLID provided. Please try again." << endl;
-        exit(1);
+        exit(1); // TODO tirar exit, voltar a pedir
       }
 
       for (char digit : PLID) {
         if (!isdigit(digit)) {
           cout << "Invalid PLID provided. Please try again." << endl;
-          exit(1);
+          exit(1); // TODO tirar exit, voltar a pedir
         }
       }
 
