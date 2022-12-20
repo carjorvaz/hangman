@@ -7,12 +7,35 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <fstream>
 #include <iostream>
+#include <map>
+#include <set>
 #include <sstream>
+#include <string>
 #include <vector>
 using namespace std;
 
-vector<string> receive_message(int fd) {
+// TODOs:
+// - começar um jogo quando já está um a decorrer está partido?
+// - ir buscar mais palavras?
+// - ela faz o REV
+struct Game {
+  string word;
+  string hint_file;
+  string current_word;
+  int max_errors;
+  int errors;
+  int trial;
+  set<char> letters;
+};
+
+struct Message {
+  vector<string> message;
+  struct sockaddr_in addr;
+};
+
+Message receive_message(int fd) {
   ssize_t n;
   socklen_t addrlen;
   struct sockaddr_in addr;
@@ -31,21 +54,41 @@ vector<string> receive_message(int fd) {
   stringstream message_stream(buffer_str);
   string message_word;
 
-  vector<string> message;
+  Message message_struct;
 
   while (message_stream >> message_word) {
-    message.push_back(message_word);
+    message_struct.message.push_back(message_word);
   }
 
-  return message;
+  message_struct.addr = addr;
+
+  //
+  cout << "Message: ";
+  for (string message_word : message_struct.message) {
+    cout << message_word << " ";
+  }
+  cout << endl;
+  //
+
+  return message_struct;
 }
 
-// TODO send_message
-// n = sendto(fd, buffer, n, 0, (struct sockaddr *)&addr, addrlen);
-// if (n == -1) {
-//   printf("An error ocurred\n");
-//   exit(1);
-// }
+void send_message(string str_msg, struct addrinfo *res, int fd,
+                  struct sockaddr_in addr, bool is_tcp) {
+  ssize_t n;
+  socklen_t addrlen;
+  addrlen = sizeof(addr);
+
+  char *msg = strdup((str_msg + "\n").c_str());
+  n = sendto(fd, msg, strlen(msg), 0, (struct sockaddr *)&addr, addrlen);
+  if (n == -1) {
+    cout << "An error occurred while sending message." << endl;
+    free(msg);
+    exit(1);
+  }
+
+  free(msg);
+}
 
 int main(int argc, char **argv) {
   int fd_udp;
@@ -94,22 +137,14 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  char buffer[128]; // TODO buffer_size
+  map<string, Game> games;
   while (true) {
     // TODO select entre UDP e TCP
     // TODO fork para cada TCP
-    vector<string> message = receive_message(fd_udp);
-
-    //
-    cout << "Message: ";
-    for (string message_word : message) {
-      cout << message_word << " ";
-    }
-    cout << endl;
-    //
-
-    if (message[0] == string("SNG")) {
-      string PLID = message[1];
+    Message message_struct = receive_message(fd_udp);
+    string keyword = message_struct.message[0];
+    if (keyword == string("SNG")) {
+      string PLID = message_struct.message[1];
 
       if (PLID.length() != 6) {
         // TODO mandar erro
@@ -121,8 +156,90 @@ int main(int argc, char **argv) {
         }
       }
 
-      // TODO escolher palavra
-      // TODO número de erros
+      ifstream word_file_stream(word_file);
+      string word_file_line;
+      getline(word_file_stream, word_file_line);
+      stringstream word_file_line_stream(word_file_line);
+
+      word_file_line_stream >> games[PLID].word;
+      word_file_line_stream >> games[PLID].hint_file;
+
+      int word_length = games[PLID].word.length();
+      int max_errors;
+      if (word_length <= 6) {
+        max_errors = 7;
+      } else if (word_length >= 7 && word_length <= 10) {
+        max_errors = 8;
+      } else {
+        max_errors = 9;
+      }
+
+      games[PLID].current_word = string(word_length, '_');
+      games[PLID].max_errors = max_errors;
+      games[PLID].errors = 0;
+      games[PLID].trial = 0;
+
+      string response = string("RSG OK " + to_string(word_length) + " " +
+                               to_string(max_errors));
+      send_message(response, res_udp, fd_udp, message_struct.addr, false);
+    } else if (keyword == string("PLG")) {
+      // TODO check if PLID exists in games set (if there's an ongoing game); ERR caso contrário
+      // TODO confirmar PLID válido
+      string PLID = message_struct.message[1];
+
+      // TODO verificar que é só uma letra e que isalpha, criar char letter
+      string letter_str = message_struct.message[2];
+      char letter = letter_str[0];
+
+      // TODO verificar que é um número de trial válido
+      string trial_str = message_struct.message[3];
+      int trial = stoi(trial_str);
+
+      games[PLID].trial++;
+      if (trial != games[PLID].trial) {
+        // TODO erro INV
+      }
+
+      int n = 0;
+      vector<int> pos;
+
+      for (int i = 0; i < games[PLID].word.length(); i++) {
+        if (games[PLID].word[i] == letter) {
+          n++;
+          pos.push_back(i + 1);
+          games[PLID].current_word[i] = letter;
+        }
+      }
+
+      string response = "RLG ";
+      if (games[PLID].current_word == games[PLID].word) {
+        response += "WIN " + to_string(trial);
+        games.erase(PLID);
+      } else if (games[PLID].letters.count(letter) > 0) {
+        response += "DUP " + to_string(trial);
+        games[PLID].trial--;
+      } else if (n == 0 && games[PLID].max_errors - games[PLID].errors > 0) {
+        response += "NOK " + to_string(trial);
+        games[PLID].errors++;
+      } else if (n == 0 && games[PLID].max_errors - games[PLID].errors <= 0) {
+        response += "OVR " + to_string(trial);
+        games.erase(PLID);
+      } else {
+        response += "OK " + to_string(trial) + " " + to_string(n);
+        for (int p : pos) {
+          response += " " + to_string(p);
+        }
+      }
+
+      //
+      cout << "response: " << response << endl;
+      //
+
+      // TODO adicionar letters ao letter quando falha e acerta
+      send_message(response, res_udp, fd_udp, message_struct.addr, false);
+    } else if (keyword == string("PWG")) {
+    } else if (keyword == string("QUT")) {
+    } else if (keyword == string("REV")) {
     }
   }
 

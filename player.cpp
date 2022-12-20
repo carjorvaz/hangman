@@ -99,7 +99,7 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
   char *msg = strdup((str_msg + "\n").c_str());
   n = sendto(fd, msg, strlen(msg), 0, res->ai_addr, res->ai_addrlen);
   if (n == -1) {
-    cout << "An error occurred." << endl;
+    cout << "An error occurred while sending message." << endl;
     free(msg);
     exit(1);
   }
@@ -258,7 +258,7 @@ int main(int argc, char **argv) {
   }
 
   string input_line, keyword;
-  while (getline(cin, input_line)) {
+  while (cout << "> " && getline(cin, input_line)) {
     // TODO check if any trash left after? passar para vector e ver
     // se tamanho é demasiado grande de acordo com cada comando
 
