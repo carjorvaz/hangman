@@ -9,6 +9,7 @@
 #include <ctype.h>
 #include <string.h>
 
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -26,6 +27,13 @@ using namespace std;
  * Se houver tempo, fazer o comando exit quando se faz ^C.
  */
 
+// TODO fazer/confirmar lógica do game_running; quando ganha/perde, ver resposta
+// que o state deve dar se nunca houve jogos
+// TODO ver se há hipóteses de mandar porcaria para o servidor (mensagens mal
+// formadas)
+// TODO protocolo é à risca, é tudo separado por um único espaço
+// TODO ERR geral?
+// TODO se houver tempo, ser resiliente a perder pacotes UDP
 // TODO fazer função que lê uma palavra e um espaço, de um socket TCP para usar
 // no send_message
 // TODO do scoreboard, praticamente só falta escrever o ficheiro
@@ -48,7 +56,6 @@ using namespace std;
 // comandos; em erros de comandos, pedir outra vez
 // TODO copiar makefile de so?
 // TODO fazer string message para todos os send message
-// TODO buffer de tamanho maior para tcp?
 // TODO não ter lista de fds tcp, abrir e fechar tcp no comando, simplesmente;
 // ver se é preciso manter e falar sempre pelo mesmo tcp
 // TODO para as imagens tcp, fazer mallac de n bytes (ver qual é o tipo)
@@ -57,14 +64,16 @@ string read_word(int fd) {
   int n;
   char buffer_tcp[1];
   string word = "";
+
   while (true) {
     n = read(fd, buffer_tcp, 1);
     if (n == -1) {
       cout << "An error occurred." << endl;
-      exit(1); // TODO fazer outra coisa sem ser exit? Manter exit que são erros importantes
+      exit(1); // TODO fazer outra coisa sem ser exit? Manter exit que são erros
+               // importantes
     }
 
-    // TODO ver se é preciso ver outras coisas (whitespace)
+    // TODO ver se é preciso ver outras coisas (whitespace) -> não é
     if (buffer_tcp[0] == ' ') {
       break;
     } else {
@@ -118,56 +127,76 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
       response.push_back(response_word);
     }
   } else {
-    // TODO encher o response?
     string response_word = read_word(fd);
-    response.push_back(response_word);
+    if (response_word.length() == 0) {
+      cout << "An error occured while trying to read from socket." << endl;
+    } else {
+      response.push_back(response_word);
+      if (response_word == string("RSB") || response_word == string("RHL") ||
+          response_word == string("RST")) {
+        string status = read_word(fd);
+        if (status.length() == 0) {
+          cout << "An error occured while trying to read from socket." << endl;
+        } else {
+          response.push_back(status);
 
-    if (response_word == string("RSB")) {
-      string status = read_word(fd);
-      response.push_back(status);
+          if (status == string("OK") || status == string("ACT") ||
+              status == string("FIN")) {
+            string Fname = read_word(fd);
+            response.push_back(Fname);
 
-      if (status == string("OK")) { // TODO: função que lê character a character
-                                    // até ao espaço do socket tcp
-        string Fname = read_word(fd);
-        response.push_back(Fname);
+            string Fsize = read_word(fd);
+            response.push_back(Fsize);
 
-        string Fsize = read_word(fd);
-        response.push_back(Fsize);
+            int tcp_buffer_size = stoi(Fsize) * sizeof(char);
+            char *tcp_buffer = (char *)malloc(tcp_buffer_size);
+            ssize_t bytes_read = 0;
 
-        // TODO experimentar continuar a ler para o mesmo buffer; ter
-        // preocupação de ler buffer size - 1 para o \0?
-        int scoreboard_buffer_size = stoi(Fsize) * sizeof(char);
-        char *scoreboard_buffer =
-            (char *)malloc(scoreboard_buffer_size); // TODO free
-        // getline(response_stream, remaining_buffer, '\0');
+            while (true) {
+              n = read(fd, tcp_buffer + bytes_read, tcp_buffer_size - bytes_read);
+              if (n == -1) {
+                printf("An error ocurred\n");
+                exit(1);
+              } else if (n == 0) {
+                break;
+              }
 
-        while (true) {
-          n = read(fd, scoreboard_buffer, scoreboard_buffer_size);
-          if (n == -1) {
-            printf("An error ocurred\n");
-            exit(1);
-          }
+              bytes_read += n;
+            }
 
-          else if (n == 0) {
-            break;
+            vector<char> Fdata(tcp_buffer, tcp_buffer + tcp_buffer_size);
+
+            ofstream file(Fname, ios::out | ios::binary);
+            file.write((char *)&Fdata[0], Fdata.size() * sizeof(char));
+            file.close();
+
+            if (response_word == string("RSB")) {
+              cout << string(tcp_buffer);
+            } else if (response_word == string("RHL")) {
+              cout << "File name: " << Fname << ", file size: " << Fsize << endl
+                   << endl;
+            } else if (response_word == string("RST")) {
+              cout << "File name: " << Fname << ", file size: " << Fsize << endl
+                   << endl;
+              cout << string(tcp_buffer) << endl;
+            }
+
+            free(tcp_buffer);
+          } else {
+            // TODO NOK?
           }
         }
-
-        string Fdata(scoreboard_buffer);
-        response.push_back(Fdata);
-      } else {
-        // TODO NOK?
       }
     }
   }
 
-    //
-    cout << "Response: ";
-    for (string response_word : response) {
-      cout << response_word << " ";
-    }
-    cout << endl << endl;
-    //
+  //
+  cout << "Response: ";
+  for (string response_word : response) {
+    cout << response_word << " ";
+  }
+  cout << endl << endl;
+  //
 
   return response;
 }
@@ -175,7 +204,6 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
 int main(int argc, char **argv) {
   int errcode;
   int fd_udp;
-  vector<int> fds_tcp;
   struct addrinfo hints_udp, *res_udp;
   struct addrinfo hints_tcp, *res_tcp;
 
@@ -188,12 +216,11 @@ int main(int argc, char **argv) {
   int trial = 0;
   int errors = 0;
   int max_errors = 0;
+  bool game_running = false;
 
+  // TODO getopts?
   for (int i = 1; i < argc; i += 2) {
     if (strcmp(argv[i], "-n") == 0) {
-      // TODO validate IPv4 with regex?
-      // https://stackoverflow.com/questions/5284147/validating-ipv4-addresses-with-regexp
-      // inet_pton?
       GSIP = argv[i + 1];
     } else if (strcmp(argv[i], "-p") == 0) {
       int port = atoi(argv[i + 1]);
@@ -263,6 +290,7 @@ int main(int argc, char **argv) {
         word = string(n_letters, '_');
         trial = 1;
         errors = 0;
+        game_running = true;
 
         cout << "New game started! Guess " << n_letters << " letter word: ";
         for (int i = 0; i < n_letters; i++) {
@@ -414,48 +442,71 @@ int main(int argc, char **argv) {
     } else if (command == string("scoreboard") || command == string("sb")) {
       int fd = socket(AF_INET, SOCK_STREAM, 0);
       if (fd == -1) {
-        cout << "An error occurred." << endl;
+        cout << "An error occurred while creating socket." << endl;
       } else if (connect(fd, res_tcp->ai_addr, res_tcp->ai_addrlen) == -1) {
-        cout << "An error occurred." << endl;
+        cout << "An error occurred while connecting to socket." << endl;
       } else {
         string message = string("GSB");
         vector<string> response = send_message(message, res_tcp, fd, true);
 
         // TODO ver se RSB
         string keyword = response[0];
-        response.erase(response.begin());
-        string status = response[0];
-        response.erase(response.begin());
+        string status = response[1];
         if (status == string("EMPTY")) {
           cout << "No game was yet won by any player." << endl << endl;
-        } else if (status == string("OK")) {
-          int n;
-
-          string Fname = response[0];
-          response.erase(response.begin());
-
-          string Fsize = response[0];
-          response.erase(response.begin());
-
-          string Fdata = response[0];
-          response.erase(response.begin());
-
-          // TODO investigar porque é que este write às vezes se parte todo
-          // n = write(1, Fdata.c_str(), stoi(Fsize));
-          // if (n == -1) {
-          //   cout << "An error occurred" << endl << endl;
-          // }
-          cout << Fdata.substr(
-              0, stoi(Fsize)); // TODO fsize é bytes, vai correr mal; se
-                               // calhar fazer mesmo este em modo C
-
-          // TODO já sei, TCP não manda por ordem; corrigir lá em cima (como?)
         }
+      }
+      close(fd);
+      // TODO dá hang quando se faz hint sem ter um jogo iniciado
+    } else if (command == string("hint") || command == string("h")) {
+      int fd;
+      if (!game_running) {
+        cout << "No game is currently running." << endl;
+      } else if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        cout << "An error occurred while creating socket." << endl;
+        close(fd);
+      } else if (connect(fd, res_tcp->ai_addr, res_tcp->ai_addrlen) == -1) {
+        cout << "An error occurred while connecting to socket." << endl;
+        close(fd);
+      } else {
+        string message = string("GHL " + PLID);
+        vector<string> response = send_message(message, res_tcp, fd, true);
 
-        // TODO close fd, apagar lista de fds_tcp (não existe esse conceito no
-        // client, é abrir e fechar uma sessão TCP)
+        // TODO ver se RHL
+        string keyword = response[0];
+        string status = response[1];
+        if (status == string("NOK")) {
+          cout << "An error occurred while receiving hint." << endl << endl;
+        }
+        close(fd);
+      }
+    } else if (command == string("state") ||
+               command == string("st")) { // TODO state sem jogo iniciado também
+                                          // dá segfault (read_word)
+      int fd;
+      if (!game_running) {
+        cout << "No game is currently running." << endl;
+      } else if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        cout << "An error occurred while creating socket." << endl;
+        close(fd);
+      } else if (connect(fd, res_tcp->ai_addr, res_tcp->ai_addrlen) == -1) {
+        cout << "An error occurred while connecting to socket." << endl;
+        close(fd);
+      } else {
+        string message = string("STA " + PLID);
+        vector<string> response = send_message(message, res_tcp, fd, true);
 
-        fds_tcp.push_back(fd); // TODO apagar
+        // TODO ver se RST
+        string keyword = response[0];
+        string status = response[1];
+        if (status == string("NOK")) {
+          cout << "An error occured while receiving state. Have you played any "
+                  "game yet?"
+               << endl
+               << endl;
+        }
+        // TODO else if status FIN, acabar o jogo
+        close(fd);
       }
     } else if (command == string("quit")) {
       string message = string("QUT " + PLID);
@@ -484,9 +535,6 @@ int main(int argc, char **argv) {
   freeaddrinfo(res_udp);
   freeaddrinfo(res_tcp);
   close(fd_udp);
-  for (int fd_tcp : fds_tcp) {
-    close(fd_tcp);
-  }
 
   return 0;
 }
