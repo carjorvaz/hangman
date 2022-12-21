@@ -159,7 +159,7 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
             while (true) {
               n = read(fd, tcp_buffer + bytes_read, tcp_buffer_size - bytes_read);
               if (n == -1) {
-                printf("An error ocurred\n");
+                cout << "An error occurred" << endl;
                 exit(1);
               } else if (n == 0) {
                 break;
@@ -455,6 +455,7 @@ int main(int argc, char **argv) {
         // TODO ver se RSB
         string keyword = response[0];
         string status = response[1];
+
         if (status == string("EMPTY")) {
           cout << "No game was yet won by any player." << endl << endl;
         }
