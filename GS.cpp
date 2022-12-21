@@ -19,7 +19,8 @@ using namespace std;
 // TODOs:
 // - começar um jogo quando já está um a decorrer está partido?
 // - ir buscar mais palavras?
-// - ela faz o REV
+// - ela faz o REV; nao ha rev
+// - ficheiro para cada jogo de cada player?
 struct Game {
   string word;
   string hint_file;
@@ -34,6 +35,20 @@ struct Message {
   vector<string> message;
   struct sockaddr_in addr;
 };
+
+bool is_valid_PLID(string PLID) {
+  if (PLID.length() != 6) {
+    return false;
+  }
+
+  for (char digit : PLID) {
+    if (!isdigit(digit)) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 Message receive_message(int fd) {
   ssize_t n;
@@ -98,7 +113,8 @@ int main(int argc, char **argv) {
   int GN = 9;
   string GSport = to_string(58000 + GN);
   string word_file = argv[1]; // TODO rebenta se vazio
-  bool verbose = false;       // TODO implementar verbose
+  ifstream word_file_stream(word_file);
+  bool verbose = false; // TODO implementar verbose
 
   // TODO erro quando outras flags? aqui e no player
   for (int i = 2; i < argc; i += 2) {
@@ -156,9 +172,11 @@ int main(int argc, char **argv) {
         }
       }
 
-      ifstream word_file_stream(word_file);
       string word_file_line;
       getline(word_file_stream, word_file_line);
+      //
+      cout << "word_file_line: " << word_file_line << endl;
+      //
       stringstream word_file_line_stream(word_file_line);
 
       word_file_line_stream >> games[PLID].word;
@@ -179,67 +197,97 @@ int main(int argc, char **argv) {
       games[PLID].errors = 0;
       games[PLID].trial = 0;
 
+      // TODO RSG NOK se já tiver começado jogo e já tiver feito uma jogada
+
       string response = string("RSG OK " + to_string(word_length) + " " +
                                to_string(max_errors));
       send_message(response, res_udp, fd_udp, message_struct.addr, false);
     } else if (keyword == string("PLG")) {
-      // TODO check if PLID exists in games set (if there's an ongoing game); ERR caso contrário
-      // TODO confirmar PLID válido
       string PLID = message_struct.message[1];
+      if (is_valid_PLID(PLID)) {
+        if (games.find(PLID) != games.end()) {
+          // TODO verificar que é só uma letra e que isalpha, criar char letter
+          string letter_str = message_struct.message[2];
+          char letter = letter_str[0];
 
-      // TODO verificar que é só uma letra e que isalpha, criar char letter
-      string letter_str = message_struct.message[2];
-      char letter = letter_str[0];
+          // TODO verificar que é um número de trial válido
+          string trial_str = message_struct.message[3];
+          int trial = stoi(trial_str);
 
-      // TODO verificar que é um número de trial válido
-      string trial_str = message_struct.message[3];
-      int trial = stoi(trial_str);
+          games[PLID].trial++;
+          if (trial != games[PLID].trial) {
+            // TODO erro INV
+          }
 
-      games[PLID].trial++;
-      if (trial != games[PLID].trial) {
-        // TODO erro INV
-      }
+          int n = 0;
+          vector<int> pos;
 
-      int n = 0;
-      vector<int> pos;
+          for (int i = 0; i < games[PLID].word.length(); i++) {
+            if (games[PLID].word[i] == letter) {
+              n++;
+              pos.push_back(i + 1);
+              games[PLID].current_word[i] = letter;
+            }
+          }
 
-      for (int i = 0; i < games[PLID].word.length(); i++) {
-        if (games[PLID].word[i] == letter) {
-          n++;
-          pos.push_back(i + 1);
-          games[PLID].current_word[i] = letter;
+          string response = "RLG ";
+          if (games[PLID].current_word == games[PLID].word) {
+            response += "WIN " + to_string(trial);
+            games.erase(PLID);
+          } else if (games[PLID].letters.count(letter) > 0) {
+            response += "DUP " + to_string(trial);
+            games[PLID].trial--;
+          } else if (n == 0 &&
+                     games[PLID].max_errors - games[PLID].errors > 0) {
+            response += "NOK " + to_string(trial);
+            games[PLID].errors++;
+            games[PLID].letters.insert(letter);
+          } else if (n == 0 &&
+                     games[PLID].max_errors - games[PLID].errors <= 0) {
+            response += "OVR " + to_string(trial);
+            games.erase(PLID);
+          } else {
+            response += "OK " + to_string(trial) + " " + to_string(n);
+            for (int p : pos) {
+              response += " " + to_string(p);
+            }
+            games[PLID].letters.insert(letter);
+          }
+
+          //
+          cout << "response: " << response << endl;
+          //
+
+          // TODO adicionar letters ao letter quando falha e acerta
+          send_message(response, res_udp, fd_udp, message_struct.addr, false);
+        } else {
+          // TODO ERR não há jogo
         }
-      }
-
-      string response = "RLG ";
-      if (games[PLID].current_word == games[PLID].word) {
-        response += "WIN " + to_string(trial);
-        games.erase(PLID);
-      } else if (games[PLID].letters.count(letter) > 0) {
-        response += "DUP " + to_string(trial);
-        games[PLID].trial--;
-      } else if (n == 0 && games[PLID].max_errors - games[PLID].errors > 0) {
-        response += "NOK " + to_string(trial);
-        games[PLID].errors++;
-      } else if (n == 0 && games[PLID].max_errors - games[PLID].errors <= 0) {
-        response += "OVR " + to_string(trial);
-        games.erase(PLID);
       } else {
-        response += "OK " + to_string(trial) + " " + to_string(n);
-        for (int p : pos) {
-          response += " " + to_string(p);
-        }
+        // TODO ERR PLID Inválido
       }
-
-      //
-      cout << "response: " << response << endl;
-      //
-
-      // TODO adicionar letters ao letter quando falha e acerta
-      send_message(response, res_udp, fd_udp, message_struct.addr, false);
     } else if (keyword == string("PWG")) {
     } else if (keyword == string("QUT")) {
-    } else if (keyword == string("REV")) {
+      string PLID = message_struct.message[1];
+      if (is_valid_PLID(PLID)) {
+        string response = "RQT ";
+        if (games.find(PLID) != games.end()) {
+          games.erase(PLID);
+          response += "OK";
+        } else {
+          response += "NOK";
+        }
+
+        //
+        cout << "response: " << response << endl;
+        //
+
+        send_message(response, res_udp, fd_udp, message_struct.addr, false);
+      } else {
+        // TODO err invalid plid
+      }
+    } else {
+        // TODO err invalid command
     }
   }
 

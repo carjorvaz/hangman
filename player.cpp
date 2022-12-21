@@ -27,6 +27,8 @@ using namespace std;
  * Se houver tempo, fazer o comando exit quando se faz ^C.
  */
 
+// TODO timer udp, se houver tempo
+// TODO terminal codes estão a aparecer nas mensagens; se houver tempo, garantir que as mensagens acabam sempre em \n
 // TODO apagar debug no send_message
 // TODO fazer/confirmar lógica do game_running; quando ganha/perde, ver resposta
 // que o state deve dar se nunca houve jogos
