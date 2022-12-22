@@ -27,11 +27,8 @@ using namespace std;
  * Se houver tempo, fazer o comando exit quando se faz ^C.
  */
 
-// TODO não incluir shell.nix na entrega
-// TODO arranjar mail do prof, para a submissão
-// TODO timer udp, se houver tempo
-// TODO terminal codes estão a aparecer nas mensagens; se houver tempo, garantir que as mensagens acabam sempre em \n
-// TODO apagar debug no send_message
+// TODO terminal codes estão a aparecer nas mensagens; se houver tempo, garantir
+// que as mensagens acabam sempre em \n
 // TODO fazer/confirmar lógica do game_running; quando ganha/perde, ver resposta
 // que o state deve dar se nunca houve jogos
 // TODO ver se há hipóteses de mandar porcaria para o servidor (mensagens mal
@@ -39,32 +36,20 @@ using namespace std;
 // TODO protocolo é à risca, é tudo separado por um único espaço
 // TODO ERR geral?
 // TODO se houver tempo, ser resiliente a perder pacotes UDP
-// TODO fazer função que lê uma palavra e um espaço, de um socket TCP para usar
-// no send_message
-// TODO do scoreboard, praticamente só falta escrever o ficheiro
-// TODO ao ler response, fazer:
-// TODO fazer README
-// TODO fazer autoavaliação e incluir no zip do projeto (junto com o README)
-// string <keyword> = response[0];
-// response.erase(response.begin());
-// TODO ter um símbolo de prompt? Por exemplo: >
-// TODO mostrar palavra quando se perde?
-// TODO nix-shell compile shortcut
-// TODO makefile (essencial é que compile o código, o resto é de pouca
-// importância)
-// TODO mudar os response[0], response[1], etc. para os nomes que aparecem no
-// enunciado (n_letters e assim)
-// TODO usar string.length() e ver se letra está a <= z e A <= Z
-// TODO quando estou a detetar erros, fazer if, else if e finalmente else se
-// estiver tudo bem (em vez de fazer exit(1), como tenho no start no PLID))
-// TODO só fazer exit(1) com erros relacionados com argumentos de linha de
-// comandos; em erros de comandos, pedir outra vez
-// TODO copiar makefile de so?
-// TODO fazer string message para todos os send message
-// TODO não ter lista de fds tcp, abrir e fechar tcp no comando, simplesmente;
-// ver se é preciso manter e falar sempre pelo mesmo tcp
-// TODO para as imagens tcp, fazer mallac de n bytes (ver qual é o tipo)
-// TODO fazer parte do TCP caracter a caracter
+bool is_valid_PLID(string PLID) {
+  if (PLID.length() != 6) {
+    return false;
+  }
+
+  for (char digit : PLID) {
+    if (!isdigit(digit)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 string read_word(int fd) {
   int n;
   char buffer_tcp[1];
@@ -74,11 +59,9 @@ string read_word(int fd) {
     n = read(fd, buffer_tcp, 1);
     if (n == -1) {
       cout << "An error occurred." << endl;
-      exit(1); // TODO fazer outra coisa sem ser exit? Manter exit que são erros
-               // importantes
+      exit(1);
     }
 
-    // TODO ver se é preciso ver outras coisas (whitespace) -> não é
     if (buffer_tcp[0] == ' ' || buffer_tcp[0] == '\n') {
       break;
     } else {
@@ -115,7 +98,7 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
                  &addrlen);
     if (n == -1) {
       cout << "An error occurred." << endl;
-      exit(1); // TODO fazer outra coisa sem ser exit?
+      exit(1);
     }
 
     string buffer_str = "";
@@ -135,17 +118,16 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
   } else {
     string response_word = read_word(fd);
     if (response_word.length() == 0) {
-      cout << "An error occured while trying to read from socket." << endl;
+      cout << "An error occurred while trying to read from socket." << endl;
     } else {
       response.push_back(response_word);
       if (response_word == string("RSB") || response_word == string("RHL") ||
           response_word == string("RST")) {
         string status = read_word(fd);
         if (status.length() == 0) {
-          cout << "An error occured while trying to read from socket." << endl;
+          cout << "An error occurred while trying to read from socket." << endl;
         } else {
           response.push_back(status);
-
           if (status == string("OK") || status == string("ACT") ||
               status == string("FIN")) {
             string Fname = read_word(fd);
@@ -159,7 +141,8 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
             ssize_t bytes_read = 0;
 
             while (true) {
-              n = read(fd, tcp_buffer + bytes_read, tcp_buffer_size - bytes_read);
+              n = read(fd, tcp_buffer + bytes_read,
+                       tcp_buffer_size - bytes_read);
               if (n == -1) {
                 cout << "An error occurred" << endl;
                 exit(1);
@@ -177,19 +160,25 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
             file.close();
 
             if (response_word == string("RSB")) {
-              cout << string(tcp_buffer);
+              cout << "Fetched scoreboard successfully." << endl
+                   << string(tcp_buffer) << "File name: " << Fname
+                   << ", file size: " << Fsize << "B." << endl
+                   << endl;
             } else if (response_word == string("RHL")) {
-              cout << "File name: " << Fname << ", file size: " << Fsize << endl
+              cout << "Fetched hint sucessfully." << endl
+                   << "File name: " << Fname << "." << endl
                    << endl;
             } else if (response_word == string("RST")) {
-              cout << "File name: " << Fname << ", file size: " << Fsize << endl
+              cout << "Fetched game state successfully." << endl
+                   << endl
+                   << string(tcp_buffer) << endl
+                   << "File name: " << Fname << "." << endl
                    << endl;
-              cout << string(tcp_buffer) << endl;
             }
 
             free(tcp_buffer);
           } else {
-            // TODO NOK?
+            response.push_back(status);
           }
         }
       }
@@ -214,7 +203,7 @@ int main(int argc, char **argv) {
   struct addrinfo hints_tcp, *res_tcp;
 
   int GN = 9;
-  string GSIP = "0.0.0.0"; // IPv4
+  string GSIP = "0.0.0.0";
   string GSport = to_string(58000 + GN);
 
   string PLID;
@@ -224,6 +213,11 @@ int main(int argc, char **argv) {
   int max_errors = 0;
   bool game_running = false;
 
+  if (argc % 2 != 1) {
+    cout << "Error: invalid number of arguments provided." << endl;
+    exit(1);
+  }
+
   for (int i = 1; i < argc; i += 2) {
     if (strcmp(argv[i], "-n") == 0) {
       GSIP = argv[i + 1];
@@ -231,15 +225,18 @@ int main(int argc, char **argv) {
       int port = atoi(argv[i + 1]);
       if (port > 65535 || port <= 1024) {
         cout << "Error: port argument in invalid range" << endl;
-        exit(-1);
+        exit(1);
       }
       GSport = argv[i + 1];
+    } else {
+      cout << "Error: invalid argument provided." << endl;
+      exit(1);
     }
   }
 
   fd_udp = socket(AF_INET, SOCK_DGRAM, 0);
   if (fd_udp == -1) {
-    cout << "An error occurred." << endl;
+    cout << "An error occurred while creating socket." << endl;
     exit(1);
   }
 
@@ -248,7 +245,7 @@ int main(int argc, char **argv) {
   hints_udp.ai_socktype = SOCK_DGRAM;
   errcode = getaddrinfo(GSIP.c_str(), GSport.c_str(), &hints_udp, &res_udp);
   if (errcode != 0) {
-    cout << "An error occurred." << endl; // TODO error message melhor?
+    cout << "An error occurred while getting address info." << endl;
     exit(1);
   }
 
@@ -257,7 +254,7 @@ int main(int argc, char **argv) {
   hints_tcp.ai_socktype = SOCK_STREAM;
   errcode = getaddrinfo(GSIP.c_str(), GSport.c_str(), &hints_tcp, &res_tcp);
   if (errcode != 0) {
-    cout << "An error occurred." << endl; // TODO error message melhor?
+    cout << "An error occurred while getting address info." << endl;
     exit(1);
   }
 
@@ -272,49 +269,37 @@ int main(int argc, char **argv) {
 
     if (command == string("start") || command == string("sg")) {
       line_stream >> PLID;
-      if (PLID.length() != 6) {
-        cout << "Invalid PLID provided. Please try again." << endl;
-        exit(1); // TODO tirar exit, voltar a pedir
-      }
+      if (is_valid_PLID(PLID)) {
+        vector<string> response =
+            send_message("SNG " + PLID, res_udp, fd_udp, false);
+        string status = response[1];
+        if (status == string("OK")) {
+          int n_letters = stoi(response[2]);
+          max_errors = stoi(response[3]);
 
-      for (char digit : PLID) {
-        if (!isdigit(digit)) {
-          cout << "Invalid PLID provided. Please try again." << endl;
-          exit(1); // TODO tirar exit, voltar a pedir
+          word = string(n_letters, '_');
+          trial = 1;
+          errors = 0;
+          game_running = true;
+
+          cout << "New game started! Guess " << n_letters << " letter word: ";
+          for (int i = 0; i < n_letters; i++) {
+            cout << "_";
+          }
+          cout << endl
+               << "You can make up to " << max_errors << " errors." << endl
+               << endl;
+        } else {
+          cout << "An error occurred. Is another game currently running?"
+               << endl
+               << endl;
         }
-      }
-
-      vector<string> response =
-          send_message("SNG " + PLID, res_udp, fd_udp, false);
-      string status = response[1];
-      // TODO check if RSG? else error
-      if (status == string("OK")) {
-        int n_letters = stoi(response[2]);
-        max_errors = stoi(response[3]);
-
-        word = string(n_letters, '_');
-        trial = 1;
-        errors = 0;
-        game_running = true;
-
-        cout << "New game started! Guess " << n_letters << " letter word: ";
-        for (int i = 0; i < n_letters; i++) {
-          cout << "_";
-        }
-        cout << endl
-             << "You can make up to " << max_errors << " errors." << endl
-             << endl;
       } else {
-        cout << "An error occurred. Is another game currently running?" << endl
-             << endl;
+        cout << "Invalid PLID provided. Please try again." << endl;
       }
     } else if (command == string("play") || command == string("pl")) {
       string letter;
       line_stream >> letter;
-
-      // TODO fazer estes checks com if else, etc. no resto (PLID e assim)
-      // TODO fazer confirmações de isalpha,etc. no guess (se todas as letras
-      // da palvra são letras, se a palavra tem o tamanho certo)
       if (letter.length() != 1) {
         cout << "Please enter one letter only. Try again." << endl << endl;
       } else if (!isalpha(letter[0])) {
@@ -330,9 +315,6 @@ int main(int argc, char **argv) {
           vector<string> response =
               send_message(message, res_udp, fd_udp, false);
 
-          // TODO check if RLG?
-
-          // TODO print this information (better)
           string status = response[1];
           if (status == string("OK")) {
             int n = stoi(response[3]);
@@ -345,14 +327,14 @@ int main(int argc, char **argv) {
 
             cout << "Correct guess! Current word: " << word << endl << endl;
           } else if (status == string("WIN")) {
-            for (int i = 0; i < word.length(); i++) {
+            for (int i = 0; i < (int)word.length(); i++) {
               if (word[i] == '_')
                 word[i] = letter[0];
             }
 
             cout << "You guessed it! The word is " << word << "!" << endl
                  << endl;
-            // TODO end game (won)
+            game_running = false;
           } else if (status == string("DUP")) {
             cout << "Duplicate guess, try again." << endl << endl;
           } else if (status == string("NOK")) {
@@ -364,10 +346,8 @@ int main(int argc, char **argv) {
                  << endl;
           } else if (status == string("OVR")) {
             cout << "The letter " << letter
-                 << " is not part of the word. You have no guesses left. The "
-                    "word "
-                    "was "
-                 << word << "." << endl // TODO this isn't the original word
+                 << " is not part of the word. You have no guesses left."
+                 << "." << endl
                  << endl;
           } else if (status == string("INV")) {
             cout << "Invalid trial number. Contact your local client's "
@@ -375,16 +355,16 @@ int main(int argc, char **argv) {
                  << endl
                  << endl;
           } else if (status == string("ERR")) {
-            cout << "Error. Have you started the game yet?" << endl
-                 << endl; // TODO mudar este print; várias vezes dá erro com o
-                          // jogo já começado; ver se há outro print igual
+            cout << "Error. Have you started the game yet?" << endl << endl;
           } else {
             cout << "Unexpected error." << endl << endl;
           }
         } else {
-          // TODO no attempts left; show final word?; finish the game (lose)
-          // TODO dá este erro se fizer jogada sem jogo começado, mudar
-          cout << "You have no attempts left. Game over." << endl << endl;
+          cout
+              << "Either the game has not started or you have no attempts left."
+              << endl
+              << endl;
+          game_running = false;
         }
       }
     } else if (command == string("guess") || command == string("gw")) {
@@ -411,37 +391,36 @@ int main(int argc, char **argv) {
                                   to_string(trial));
           vector<string> response =
               send_message(message, res_udp, fd_udp, false);
-          // TODO check if RWG?
-          // TODO print this information (better)
+
           if (response[1] == string("WIN")) {
             word = guessed_word;
             cout << "You guessed it! The word is indeed " << word << "!" << endl
                  << endl;
-            // TODO end game (won)
+            game_running = false;
           } else if (response[1] == string("DUP")) {
             cout << "Duplicate guess, try again." << endl << endl;
           } else if (response[1] == string("NOK")) {
             trial++;
             errors++;
-
             cout << "Wrong guess. Try again." << endl << endl;
           } else if (response[1] == string("OVR")) {
-            cout << "Wrong guess. You have no guesses left. The word was "
-                 << word << "." << endl
-                 << endl; // TODO isn't the original word
+            cout << "Wrong guess. You have no guesses left."
+                 << "." << endl
+                 << endl;
           } else if (response[1] == string("INV")) {
             cout << "Invalid trial number. Contact your local client's "
                     "developer."
                  << endl
                  << endl;
           } else if (response[1] == string("ERR")) {
-            cout << "Error. Have you started the game yet?" << endl << endl;
-            // TODO também pode dar erro se a guessed_word não tiver o mesmo
-            // comprimento da palavra
+            cout << "Either the word was the wrong length or you haven't "
+                    "started the game yet. Try again."
+                 << endl
+                 << endl;
           }
         } else {
-          // TODO no attempts left; show final word?; finish the game (lose)
           cout << "You have no attempts left. Game over." << endl << endl;
+            game_running = false;
         }
       }
     } else if (command == string("scoreboard") || command == string("sb")) {
@@ -454,7 +433,6 @@ int main(int argc, char **argv) {
         string message = string("GSB");
         vector<string> response = send_message(message, res_tcp, fd, true);
 
-        // TODO ver se RSB
         string keyword = response[0];
         string status = response[1];
 
@@ -462,8 +440,8 @@ int main(int argc, char **argv) {
           cout << "No game was yet won by any player." << endl << endl;
         }
       }
-      close(fd);
-      // TODO dá hang quando se faz hint sem ter um jogo iniciado
+
+      close(fd); // TODO dá hang quando se faz hint sem ter um jogo iniciado
     } else if (command == string("hint") || command == string("h")) {
       int fd;
       if (!game_running) {
@@ -478,7 +456,6 @@ int main(int argc, char **argv) {
         string message = string("GHL " + PLID);
         vector<string> response = send_message(message, res_tcp, fd, true);
 
-        // TODO ver se RHL
         string keyword = response[0];
         string status = response[1];
         if (status == string("NOK")) {
@@ -486,9 +463,7 @@ int main(int argc, char **argv) {
         }
         close(fd);
       }
-    } else if (command == string("state") ||
-               command == string("st")) { // TODO state sem jogo iniciado também
-                                          // dá segfault (read_word)
+    } else if (command == string("state") || command == string("st")) {
       int fd;
       if (!game_running) {
         cout << "No game is currently running." << endl;
@@ -502,23 +477,24 @@ int main(int argc, char **argv) {
         string message = string("STA " + PLID);
         vector<string> response = send_message(message, res_tcp, fd, true);
 
-        // TODO ver se RST
         string keyword = response[0];
         string status = response[1];
         if (status == string("NOK")) {
-          cout << "An error occured while receiving state. Have you played any "
-                  "game yet?"
-               << endl
-               << endl;
+          cout
+              << "An error occurred while receiving state. Have you played any "
+                 "game yet?"
+              << endl
+              << endl;
+        } else if (status == string("FIN")) {
+          cout << "The game has ended." << endl << endl;
         }
-        // TODO else if status FIN, acabar o jogo
+
         close(fd);
       }
     } else if (command == string("quit")) {
       string message = string("QUT " + PLID);
       vector<string> response = send_message(message, res_udp, fd_udp, false);
 
-      // TODO check if QUT (else ERR)?
       if (response[1] == string("OK")) {
         cout << "Ongoing game has been terminated successfully." << endl
              << endl;
@@ -531,7 +507,6 @@ int main(int argc, char **argv) {
       string message = string("QUT " + PLID);
       vector<string> response = send_message(message, res_udp, fd_udp, false);
       cout << "Exiting..." << endl;
-      // exit(0); // TODO isto estava mal
       break;
     } else {
       cout << "Unknown player command." << endl << endl;

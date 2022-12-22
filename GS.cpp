@@ -19,19 +19,21 @@ using namespace std;
 
 // TODO projeto:
 // - fazer autoavaliação
-// - correr testes do servidor
-// - fazer makefile
 // - fazer readme
-//   - dizer que estamos à espera dos ficheiros de hint na pasta hints
+// - fazer print to pdf dos testes e ter numa pasta autoavaliação, juntamente
+// com o excel
+// - não incluir shell.nix na entrega, não incluir hidden files na pasta
+// - apagar message e response no player antes de entregar
+// - garantir que zip do projeto extrai para a pasta atual com o unzip
 //
-// - fazer TODOs
+// - fazer TODOs (prioridade é mensagens de erro)
 // - reler o enunciado todo
 // - update ao scoreboard
+// - ter \n no fim das mensagens que o servidor recebe?
+// - scoreboard e state do servidor não estão funcionais
 
 // TODOs:
 // - começar um jogo quando já está um a decorrer está partido?
-// - ir buscar mais palavras?
-// - ela faz o REV; nao ha rev
 // - ficheiro para cada jogo de cada player?
 struct Game {
   string word;
@@ -90,14 +92,6 @@ Message receive_message(int fd) {
 
   message_struct.addr = addr;
 
-  //
-  cout << "Message: ";
-  for (string message_word : message_struct.message) {
-    cout << message_word << " ";
-  }
-  cout << endl;
-  //
-
   return message_struct;
 }
 
@@ -130,25 +124,45 @@ int main(int argc, char **argv) {
 
   int GN = 9;
   string GSport = to_string(58000 + GN);
-  string word_file = argv[1]; // TODO rebenta se vazio
-  ifstream word_file_stream(word_file);
-  bool verbose = false; // TODO implementar verbose
+  string word_file = "";
 
-  // TODO erro quando outras flags? aqui e no player
+  if (argc % 2 != 0) {
+    cout << "Error: invalid number of arguments provided." << endl;
+    exit(1);
+  }
+
+  if (argc > 1) {
+    word_file += argv[1];
+  }
+
+  if (word_file.length() <= 2) {
+    cout << "Error: invalid word file provided." << endl;
+    exit(1);
+  }
+
+  ifstream word_file_stream(word_file);
+  if (!(word_file_stream = ifstream(word_file))) {
+    cout << "Error: invalid word file provided." << endl;
+    exit(1);
+  }
+
+  bool verbose = false;
   for (int i = 2; i < argc; i += 2) {
     if (strcmp(argv[i], "-p") == 0) {
       int port = atoi(argv[i + 1]);
       if (port > 65535 || port <= 1024) {
-        cout << "Error: port argument in invalid range" << endl;
-        exit(-1);
+        cout << "Error: port argument in invalid range." << endl;
+        exit(1);
       }
       GSport = argv[i + 1];
     } else if (strcmp(argv[i], "-v") == 0) {
       verbose = true;
+    } else {
+      cout << "Error: invalid argument provided." << endl;
+      exit(1);
     }
   }
 
-  // TODO map de string (PLID) para struct com word, trial, errors, max_errors
   fd_udp = socket(AF_INET, SOCK_DGRAM, 0);
   if (fd_udp == -1) {
     cout << "An error occurred." << endl;
@@ -211,187 +225,225 @@ int main(int argc, char **argv) {
                               "      GOOD TRIALS  TOTAL TRIALS"));
   scoreboard.push_back(string(""));
 
-  int ready;
   while (true) {
-    // TODO é preciso fd_zero?
     FD_SET(fd_udp, &fds);
     FD_SET(fd_tcp, &fds);
 
-    ready = select(max_fds, &fds, NULL, NULL, NULL);
+    if (select(max_fds, &fds, NULL, NULL, NULL) == -1) {
+      cout << "An error occurred." << endl;
+      exit(1);
+    }
 
     if (FD_ISSET(fd_udp, &fds)) {
       Message message_struct = receive_message(fd_udp);
+
+      if (verbose) {
+        cout << "Message: ";
+        for (string message_word : message_struct.message) {
+          cout << message_word << " ";
+        }
+        cout << endl;
+      }
+
       string keyword = message_struct.message[0];
       if (keyword == string("SNG")) {
+        string response = "RSG ";
         string PLID = message_struct.message[1];
         if (is_valid_PLID(PLID)) {
-          string word_file_line;
-          getline(word_file_stream, word_file_line);
-          //
-          cout << "word_file_line: " << word_file_line << endl;
-          //
-          stringstream word_file_line_stream(word_file_line);
-
-          word_file_line_stream >> games[PLID].word;
-          word_file_line_stream >> games[PLID].hint_file;
-
-          int word_length = games[PLID].word.length();
-          int max_errors;
-          if (word_length <= 6) {
-            max_errors = 7;
-          } else if (word_length >= 7 && word_length <= 10) {
-            max_errors = 8;
+          if (games.find(PLID) != games.end() && games[PLID].trial > 0) {
+            response += "NOK";
           } else {
-            max_errors = 9;
+            string word_file_line;
+            if (!getline(word_file_stream, word_file_line)) {
+              word_file_stream.clear();
+              word_file_stream.seekg(0, ios::beg);
+              getline(word_file_stream, word_file_line);
+            }
+
+            if (verbose)
+              cout << "word_file: " << word_file_line << endl;
+
+            stringstream word_file_line_stream(word_file_line);
+
+            word_file_line_stream >> games[PLID].word;
+            word_file_line_stream >> games[PLID].hint_file;
+
+            int word_length = (int)games[PLID].word.length();
+            int max_errors;
+            if (word_length <= 6) {
+              max_errors = 7;
+            } else if (word_length >= 7 && word_length <= 10) {
+              max_errors = 8;
+            } else {
+              max_errors = 9;
+            }
+
+            games[PLID].current_word = string(word_length, '_');
+            games[PLID].max_errors = max_errors;
+            games[PLID].errors = 0;
+            games[PLID].trial = 0;
+
+            response += string("OK " + to_string(word_length) + " " +
+                               to_string(max_errors));
           }
-
-          games[PLID].current_word = string(word_length, '_');
-          games[PLID].max_errors = max_errors;
-          games[PLID].errors = 0;
-          games[PLID].trial = 0;
-
-          // TODO RSG NOK se já tiver começado jogo e já tiver feito uma jogada
-
-          string response = string("RSG OK " + to_string(word_length) + " " +
-                                   to_string(max_errors));
-          send_message(response, res_udp, fd_udp, message_struct.addr, false);
         } else {
-          // TODO err invalid plid
+          response += "ERR";
         }
+
+        if (verbose) {
+          cout << "RSG response: " << response << endl;
+        }
+
+        send_message(response, res_udp, fd_udp, message_struct.addr, false);
       } else if (keyword == string("PLG")) {
+        string response = "RLG ";
         string PLID = message_struct.message[1];
+        string trial_str = message_struct.message[3];
+        int trial = stoi(trial_str);
         if (is_valid_PLID(PLID)) {
           if (games.find(PLID) != games.end()) {
-            // TODO verificar que é só uma letra e que isalpha, criar char
-            // letter
             string letter_str = message_struct.message[2];
-            char letter = letter_str[0];
-
-            // TODO verificar que é um número de trial válido
-            string trial_str = message_struct.message[3];
-            int trial = stoi(trial_str);
-
-            games[PLID].trial++;
-            if (trial != games[PLID].trial) {
-              // TODO erro INV
-            }
-
-            int n = 0;
-            vector<int> pos;
-
-            for (int i = 0; i < games[PLID].word.length(); i++) {
-              if (games[PLID].word[i] == letter) {
-                n++;
-                pos.push_back(i + 1);
-                games[PLID].current_word[i] = letter;
-              }
-            }
-
-            string response = "RLG ";
-            if (games[PLID].current_word == games[PLID].word) {
-              response += "WIN " + to_string(trial);
-              games.erase(PLID);
-            } else if (games[PLID].letters.count(letter) > 0) {
-              response += "DUP " + to_string(trial);
-              games[PLID].trial--;
-            } else if (n == 0 &&
-                       games[PLID].max_errors - games[PLID].errors > 0) {
-              response += "NOK " + to_string(trial);
-              games[PLID].errors++;
-              games[PLID].letters.insert(letter);
-            } else if (n == 0 &&
-                       games[PLID].max_errors - games[PLID].errors <= 0) {
-              response += "OVR " + to_string(trial);
-              games.erase(PLID);
+            if (letter_str.length() != 1) {
+              response += "ERR" + trial_str;
+            } else if (!isalpha(letter_str[0])) {
+              response += "ERR" + trial_str;
             } else {
-              response += "OK " + to_string(trial) + " " + to_string(n);
-              for (int p : pos) {
-                response += " " + to_string(p);
-              }
-              games[PLID].letters.insert(letter);
-            }
+              char letter = letter_str[0];
 
-            // TODO adicionar letters ao letter quando falha e acerta
-            send_message(response, res_udp, fd_udp, message_struct.addr, false);
+              games[PLID].trial++;
+              if (trial != games[PLID].trial) {
+                response += "INV" + trial_str;
+                games[PLID].trial--;
+              } else {
+                int n = 0;
+                vector<int> pos;
+
+                for (int i = 0; i < (int)games[PLID].word.length(); i++) {
+                  if (games[PLID].word[i] == letter) {
+                    n++;
+                    pos.push_back(i + 1);
+                    games[PLID].current_word[i] = letter;
+                  }
+                }
+
+                if (games[PLID].current_word == games[PLID].word) {
+                  response += "WIN " + trial_str;
+                  games.erase(PLID);
+                } else if (games[PLID].letters.count(letter) > 0) {
+                  response += "DUP " + trial_str;
+                  games[PLID].trial--;
+                } else if (n == 0 &&
+                           games[PLID].max_errors - games[PLID].errors > 0) {
+                  response += "NOK " + trial_str;
+                  games[PLID].errors++;
+                  games[PLID].letters.insert(letter);
+                } else if (n == 0 &&
+                           games[PLID].max_errors - games[PLID].errors <= 0) {
+                  response += "OVR " + trial_str;
+                  games.erase(PLID);
+                } else {
+                  response += "OK " + trial_str + " " + to_string(n);
+                  for (int p : pos) {
+                    response += " " + to_string(p);
+                  }
+                  games[PLID].letters.insert(letter);
+                }
+              }
+            }
           } else {
-            // TODO ERR não há jogo
+            response += "ERR" + trial_str;
           }
         } else {
-          // TODO ERR PLID Inválido
+          response += "ERR" + trial_str;
         }
+
+        if (verbose) {
+          cout << "RLG response: " << response << endl;
+        }
+
+        send_message(response, res_udp, fd_udp, message_struct.addr, false);
       } else if (keyword == string("PWG")) {
         string response = "RWG ";
         string PLID = message_struct.message[1];
-        // TODO ERR caso a syntax do PWG seja inválida
-        // TODO ERR quando não há jogo
+        string guess_str = message_struct.message[2];
+        string trial_str = message_struct.message[3];
+        int trial = stoi(trial_str);
 
         if (is_valid_PLID(PLID)) {
-          string guess_str = message_struct.message[2];
-
-          if (guess_str.length() == games[PLID].word.length()) {
-            for (int i = 0; i < guess_str.length(); i++) {
-              if (!isalpha(guess_str[i])) {
-                response += "ERR\n"; // TODO confirmar
-                break;
+          if (games.find(PLID) != games.end()) {
+            if (guess_str.length() == games[PLID].word.length()) {
+              for (int i = 0; i < (int)guess_str.length(); i++) {
+                if (!isalpha(guess_str[i])) {
+                  response += "ERR";
+                  break;
+                }
               }
+
+              games[PLID].trial++;
+              if (trial != games[PLID].trial) {
+                response += "INV" + trial_str;
+                games[PLID].trial--;
+
+              } else {
+                if (guess_str == games[PLID].word) {
+                  response += "WIN " + to_string(trial);
+                  games.erase(PLID);
+                } else if (games[PLID].guessed_words.count(guess_str) > 0) {
+                  response += "DUP " + to_string(trial);
+                  games[PLID].trial--;
+                } else if (guess_str != games[PLID].word &&
+                           games[PLID].max_errors - games[PLID].errors > 0) {
+                  response += "NOK " + to_string(trial);
+                  games[PLID].errors++;
+                  games[PLID].guessed_words.insert(guess_str);
+                } else if (guess_str != games[PLID].word &&
+                           games[PLID].max_errors - games[PLID].errors <= 0) {
+                  response += "OVR " + to_string(trial);
+                  games.erase(PLID);
+                }
+              }
+            } else {
+              response += "ERR " + to_string(trial);
             }
-
-            string trial_str = message_struct.message[3];
-            int trial = stoi(trial_str);
-
-            games[PLID].trial++;
-            // TODO ERR se não forem iguais
-
-            if (guess_str == games[PLID].word) {
-              response += "WIN " + to_string(trial);
-              games.erase(PLID);
-            } else if (games[PLID].guessed_words.count(guess_str) > 0) {
-              response += "DUP " + to_string(trial);
-              games[PLID].trial--;
-            } else if (guess_str != games[PLID].word &&
-                       games[PLID].max_errors - games[PLID].errors > 0) {
-              response += "NOK " + to_string(trial);
-              games[PLID].errors++;
-              games[PLID].guessed_words.insert(guess_str);
-            } else if (guess_str != games[PLID].word &&
-                       games[PLID].max_errors - games[PLID].errors <= 0) {
-              response += "OVR " + to_string(trial);
-              games.erase(PLID);
-            } else if (trial !=
-                       games[PLID].trial + 1) { // TODO incompleto, falta o "ou"
-              response +=
-                  "INV" +
-                  to_string(
-                      trial); // trial inválida - confirmar, not sure do + 1
-            }
-
-            // TODO trials; afinal trials das letras e das palavras são
-            // diferentes?
-            // TODO tirar trial dos ifs e passar para baixo
-
-            send_message(response, res_udp, fd_udp, message_struct.addr, false);
-
           } else {
-            // TODO ERR
+            response += "ERR " + to_string(trial);
           }
+        } else {
+          response += "ERR" + to_string(trial);
         }
+
+        if (verbose) {
+          cout << "RWG response: " << response << endl;
+        }
+
+        send_message(response, res_udp, fd_udp, message_struct.addr, false);
       } else if (keyword == string("QUT")) {
+        string response = "RQT ";
         string PLID = message_struct.message[1];
         if (is_valid_PLID(PLID)) {
-          string response = "RQT ";
           if (games.find(PLID) != games.end()) {
             games.erase(PLID);
             response += "OK";
           } else {
             response += "NOK";
           }
-
-          send_message(response, res_udp, fd_udp, message_struct.addr, false);
         } else {
-          // TODO err invalid plid
+          response += "ERR";
         }
+
+        if (verbose) {
+          cout << "RQT response: " << response << endl;
+        }
+
+        send_message(response, res_udp, fd_udp, message_struct.addr, false);
       } else {
-        // TODO err invalid command
+        string response = "ERR";
+
+        if (verbose) {
+          cout << "ERR response: " << response << endl;
+        }
+
+        send_message(response, res_udp, fd_udp, message_struct.addr, false);
       }
     }
 
@@ -406,15 +458,20 @@ int main(int argc, char **argv) {
             receive_message(player_fd); // TODO mudar, fazer tudo aqui
                                         // é para ser read em vez de recvfrom,
                                         // pode ser partido aos bocados
+        if (verbose) {
+          cout << "Message: ";
+          for (string message_word : message_struct.message) {
+            cout << message_word << " ";
+          }
+          cout << endl;
+        }
+
         string keyword = message_struct.message[0];
         if (keyword == string("GSB")) {
           string response = string("RSB ");
 
           if (scoreboard.size() <= 4) {
-            response +=
-                string("EMPTY "); // TODO não é suposto haver espaço no fim mas
-                                  // read_word do player está à espera de um
-                                  // espaço, arranjar se houver tempo
+            response += string("EMPTY");
           } else {
             string Fname = "scoreboard.txt";
             string Fdata = "";
@@ -423,7 +480,7 @@ int main(int argc, char **argv) {
               Fdata += line + "\n";
             }
 
-            int Fsize = Fdata.length();
+            int Fsize = (int)Fdata.length();
 
             response +=
                 string("OK " + Fname + " " + to_string(Fsize) + " " + Fdata);
@@ -489,11 +546,13 @@ int main(int argc, char **argv) {
           if (is_valid_PLID(PLID)) {
             if (games.find(PLID) != games.end()) {
               string Fname = "STATE_" + PLID + ".txt"; // TODO
-              string Fdata = "Active game found for player " + PLID + "\nGame started - ";
+              string Fdata =
+                  "Active game found for player " + PLID + "\nGame started - ";
               // TODO if transactions... else "no transactions found"
               Fdata += "\nSolved so far: " + games[PLID].current_word + "\n";
 
-              // TODO guardar todas as jogadas do player (vector<string>) e mostrar aqui
+              // TODO guardar todas as jogadas do player (vector<string>) e
+              // mostrar aqui
 
               int Fsize = Fdata.length();
 
