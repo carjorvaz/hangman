@@ -15,27 +15,6 @@
 #include <vector>
 using namespace std;
 
-/*
- * NOTE:
- * - When debugging with wireshark, use the filter: ip.addr == <tejo's ip>
- * - Test with:
- *   ❯ g++ player.cpp -o player && ./player -n tejo.tecnico.ulisboa.pt -p 58011
- *
- * Known errors:
- * - Se cancelarmos um jogo com ^C, não o conseguimos parar na próxima execução.
- * É preciso parar manualmente com o nc.
- * Se houver tempo, fazer o comando exit quando se faz ^C.
- */
-
-// TODO terminal codes estão a aparecer nas mensagens; se houver tempo, garantir
-// que as mensagens acabam sempre em \n
-// TODO fazer/confirmar lógica do game_running; quando ganha/perde, ver resposta
-// que o state deve dar se nunca houve jogos
-// TODO ver se há hipóteses de mandar porcaria para o servidor (mensagens mal
-// formadas)
-// TODO protocolo é à risca, é tudo separado por um único espaço
-// TODO ERR geral?
-// TODO se houver tempo, ser resiliente a perder pacotes UDP
 bool is_valid_PLID(string PLID) {
   if (PLID.length() != 6) {
     return false;
@@ -105,10 +84,6 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
     buffer_str += string(buffer);
     stringstream response_stream(buffer_str);
     string response_word;
-
-    //
-    cout << endl << "Message: " << str_msg << endl;
-    //
 
     response_stream >> response_word;
     response.push_back(response_word);
@@ -185,14 +160,6 @@ vector<string> send_message(string str_msg, struct addrinfo *res, int fd,
     }
   }
 
-  //
-  cout << "Response: ";
-  for (string response_word : response) {
-    cout << response_word << " ";
-  }
-  cout << endl << endl;
-  //
-
   return response;
 }
 
@@ -260,9 +227,6 @@ int main(int argc, char **argv) {
 
   string input_line, keyword;
   while (cout << "> " && getline(cin, input_line)) {
-    // TODO check if any trash left after? passar para vector e ver
-    // se tamanho é demasiado grande de acordo com cada comando
-
     stringstream line_stream(input_line);
     string command;
     line_stream >> command;
@@ -420,7 +384,7 @@ int main(int argc, char **argv) {
           }
         } else {
           cout << "You have no attempts left. Game over." << endl << endl;
-            game_running = false;
+          game_running = false;
         }
       }
     } else if (command == string("scoreboard") || command == string("sb")) {
@@ -441,7 +405,7 @@ int main(int argc, char **argv) {
         }
       }
 
-      close(fd); // TODO dá hang quando se faz hint sem ter um jogo iniciado
+      close(fd);
     } else if (command == string("hint") || command == string("h")) {
       int fd;
       if (!game_running) {
@@ -465,9 +429,7 @@ int main(int argc, char **argv) {
       }
     } else if (command == string("state") || command == string("st")) {
       int fd;
-      if (!game_running) {
-        cout << "No game is currently running." << endl;
-      } else if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+      if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         cout << "An error occurred while creating socket." << endl;
         close(fd);
       } else if (connect(fd, res_tcp->ai_addr, res_tcp->ai_addrlen) == -1) {

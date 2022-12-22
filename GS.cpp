@@ -17,25 +17,8 @@
 #include <vector>
 using namespace std;
 
-// TODO projeto:
-// - fazer autoavaliação
-// - fazer readme
-// - fazer print to pdf dos testes e ter numa pasta autoavaliação, juntamente
-// com o excel
-// - não incluir shell.nix na entrega, não incluir hidden files na pasta
-// - apagar message e response no player antes de entregar
-// - garantir que zip do projeto extrai para a pasta atual com o unzip
-//
-// - fazer TODOs (prioridade é mensagens de erro)
-// - reler o enunciado todo
-// - update ao scoreboard
-// - ter \n no fim das mensagens que o servidor recebe?
-// - scoreboard e state do servidor não estão funcionais
-
-// TODOs:
-// - começar um jogo quando já está um a decorrer está partido?
-// - ficheiro para cada jogo de cada player?
 struct Game {
+  bool game_running;
   string word;
   string hint_file;
   string current_word;
@@ -44,6 +27,7 @@ struct Game {
   int trial;
   set<char> letters;
   set<string> guessed_words;
+  vector<string> transactions;
 };
 
 struct Message {
@@ -96,7 +80,7 @@ Message receive_message(int fd) {
 }
 
 void send_message(string str_msg, struct addrinfo *res, int fd,
-                  struct sockaddr_in addr, bool is_tcp) {
+                  struct sockaddr_in addr) {
   ssize_t n;
   socklen_t addrlen;
   addrlen = sizeof(addr);
@@ -125,11 +109,6 @@ int main(int argc, char **argv) {
   int GN = 9;
   string GSport = to_string(58000 + GN);
   string word_file = "";
-
-  if (argc % 2 != 0) {
-    cout << "Error: invalid number of arguments provided." << endl;
-    exit(1);
-  }
 
   if (argc > 1) {
     word_file += argv[1];
@@ -218,12 +197,10 @@ int main(int argc, char **argv) {
   int max_fds = max(fd_udp, fd_tcp) + 1;
   map<string, Game> games;
   vector<string> scoreboard;
-  scoreboard.push_back(string("-------------------------------- TOP 10 SCORES "
-                              "--------------------------------"));
+  scoreboard.push_back(string("Scoreboard:"));
   scoreboard.push_back(string(""));
-  scoreboard.push_back(string("    SCORE PLAYER     WORD                       "
-                              "      GOOD TRIALS  TOTAL TRIALS"));
-  scoreboard.push_back(string(""));
+  scoreboard.push_back(string("PLAYER\tWORD\t\tTRIALS"));
+  scoreboard.push_back(string("------------------------------"));
 
   while (true) {
     FD_SET(fd_udp, &fds);
@@ -236,21 +213,23 @@ int main(int argc, char **argv) {
 
     if (FD_ISSET(fd_udp, &fds)) {
       Message message_struct = receive_message(fd_udp);
+      string message = "";
+      for (string message_word : message_struct.message) {
+        message += message_word + " ";
+      }
 
       if (verbose) {
-        cout << "Message: ";
-        for (string message_word : message_struct.message) {
-          cout << message_word << " ";
-        }
-        cout << endl;
+        cout << "Message: " << message << endl;
       }
+
+      games[message_struct.message[1]].transactions.push_back(message);
 
       string keyword = message_struct.message[0];
       if (keyword == string("SNG")) {
         string response = "RSG ";
         string PLID = message_struct.message[1];
         if (is_valid_PLID(PLID)) {
-          if (games.find(PLID) != games.end() && games[PLID].trial > 0) {
+          if (games.find(PLID) != games.end() && games[PLID].game_running) {
             response += "NOK";
           } else {
             string word_file_line;
@@ -282,6 +261,8 @@ int main(int argc, char **argv) {
             games[PLID].max_errors = max_errors;
             games[PLID].errors = 0;
             games[PLID].trial = 0;
+            games[PLID].game_running = true;
+            games[PLID].transactions = vector<string>();
 
             response += string("OK " + to_string(word_length) + " " +
                                to_string(max_errors));
@@ -294,7 +275,7 @@ int main(int argc, char **argv) {
           cout << "RSG response: " << response << endl;
         }
 
-        send_message(response, res_udp, fd_udp, message_struct.addr, false);
+        send_message(response, res_udp, fd_udp, message_struct.addr);
       } else if (keyword == string("PLG")) {
         string response = "RLG ";
         string PLID = message_struct.message[1];
@@ -328,7 +309,10 @@ int main(int argc, char **argv) {
 
                 if (games[PLID].current_word == games[PLID].word) {
                   response += "WIN " + trial_str;
-                  games.erase(PLID);
+                  games[PLID].game_running = false;
+                  games[PLID].current_word = games[PLID].word;
+                  string scoreboard_entry = PLID + "\t" + games[PLID].word + "\t" + to_string(games[PLID].trial);
+                  scoreboard.push_back(scoreboard_entry);
                 } else if (games[PLID].letters.count(letter) > 0) {
                   response += "DUP " + trial_str;
                   games[PLID].trial--;
@@ -340,7 +324,7 @@ int main(int argc, char **argv) {
                 } else if (n == 0 &&
                            games[PLID].max_errors - games[PLID].errors <= 0) {
                   response += "OVR " + trial_str;
-                  games.erase(PLID);
+                  games[PLID].game_running = false;
                 } else {
                   response += "OK " + trial_str + " " + to_string(n);
                   for (int p : pos) {
@@ -361,7 +345,7 @@ int main(int argc, char **argv) {
           cout << "RLG response: " << response << endl;
         }
 
-        send_message(response, res_udp, fd_udp, message_struct.addr, false);
+        send_message(response, res_udp, fd_udp, message_struct.addr);
       } else if (keyword == string("PWG")) {
         string response = "RWG ";
         string PLID = message_struct.message[1];
@@ -383,11 +367,13 @@ int main(int argc, char **argv) {
               if (trial != games[PLID].trial) {
                 response += "INV" + trial_str;
                 games[PLID].trial--;
-
               } else {
                 if (guess_str == games[PLID].word) {
                   response += "WIN " + to_string(trial);
-                  games.erase(PLID);
+                  games[PLID].game_running = false;
+                  games[PLID].current_word = games[PLID].word;
+                  string scoreboard_entry = PLID + "\t" + games[PLID].word + "\t" + to_string(games[PLID].trial);
+                  scoreboard.push_back(scoreboard_entry);
                 } else if (games[PLID].guessed_words.count(guess_str) > 0) {
                   response += "DUP " + to_string(trial);
                   games[PLID].trial--;
@@ -399,7 +385,7 @@ int main(int argc, char **argv) {
                 } else if (guess_str != games[PLID].word &&
                            games[PLID].max_errors - games[PLID].errors <= 0) {
                   response += "OVR " + to_string(trial);
-                  games.erase(PLID);
+                  games[PLID].game_running = false;
                 }
               }
             } else {
@@ -416,13 +402,13 @@ int main(int argc, char **argv) {
           cout << "RWG response: " << response << endl;
         }
 
-        send_message(response, res_udp, fd_udp, message_struct.addr, false);
+        send_message(response, res_udp, fd_udp, message_struct.addr);
       } else if (keyword == string("QUT")) {
         string response = "RQT ";
         string PLID = message_struct.message[1];
         if (is_valid_PLID(PLID)) {
           if (games.find(PLID) != games.end()) {
-            games.erase(PLID);
+            games[PLID].game_running = false;
             response += "OK";
           } else {
             response += "NOK";
@@ -435,7 +421,7 @@ int main(int argc, char **argv) {
           cout << "RQT response: " << response << endl;
         }
 
-        send_message(response, res_udp, fd_udp, message_struct.addr, false);
+        send_message(response, res_udp, fd_udp, message_struct.addr);
       } else {
         string response = "ERR";
 
@@ -443,7 +429,7 @@ int main(int argc, char **argv) {
           cout << "ERR response: " << response << endl;
         }
 
-        send_message(response, res_udp, fd_udp, message_struct.addr, false);
+        send_message(response, res_udp, fd_udp, message_struct.addr);
       }
     }
 
@@ -458,12 +444,13 @@ int main(int argc, char **argv) {
             receive_message(player_fd); // TODO mudar, fazer tudo aqui
                                         // é para ser read em vez de recvfrom,
                                         // pode ser partido aos bocados
+        string message = "";
+        for (string message_word : message_struct.message) {
+          message += message_word;
+        }
+
         if (verbose) {
-          cout << "Message: ";
-          for (string message_word : message_struct.message) {
-            cout << message_word << " ";
-          }
-          cout << endl;
+          cout << "Message: " << message << endl;
         }
 
         string keyword = message_struct.message[0];
@@ -479,15 +466,13 @@ int main(int argc, char **argv) {
             for (string line : scoreboard) {
               Fdata += line + "\n";
             }
+            Fdata += "\n";
 
             int Fsize = (int)Fdata.length();
 
             response +=
                 string("OK " + Fname + " " + to_string(Fsize) + " " + Fdata);
-            // TODO ordenar scoreboard, usar index para fazer o 1 -; acrescentar
-            // à scoreboard no WIN
-            // TODO efetivamente acrescentar coisas à scoreboard, ter atenção
-            // aos tabs para ficar alinhado
+
             int n;
             ssize_t bytes_written = 0;
             while (true) {
@@ -502,10 +487,6 @@ int main(int argc, char **argv) {
 
               bytes_written += n;
             }
-
-            // TODO apagar e tirar is_tcp do send_message
-            // send_message(response, res_udp, fd_udp, message_struct.addr,
-            // false);
           }
         } else if (keyword == string("GHL")) {
           string response = string("RHL ");
@@ -545,25 +526,36 @@ int main(int argc, char **argv) {
           string PLID = message_struct.message[1];
           if (is_valid_PLID(PLID)) {
             if (games.find(PLID) != games.end()) {
-              string Fname = "STATE_" + PLID + ".txt"; // TODO
-              string Fdata =
-                  "Active game found for player " + PLID + "\nGame started - ";
-              // TODO if transactions... else "no transactions found"
-              Fdata += "\nSolved so far: " + games[PLID].current_word + "\n";
+              string Fname = "STATE_" + PLID + ".txt";
+              if (games[PLID].game_running) {
+                string Fdata = "Active game found for player " + PLID + "\n";
+                Fdata += "Transactions:\n";
+                for (string transaction : games[PLID].transactions) {
+                  Fdata += "  " + transaction + "\n";
+                }
+                Fdata += "\nSolved so far: " + games[PLID].current_word + "\n";
+                int Fsize = Fdata.length();
 
-              // TODO guardar todas as jogadas do player (vector<string>) e
-              // mostrar aqui
+                response += string("ACT " + Fname + " " + to_string(Fsize) +
+                                   " " + Fdata);
+              } else {
+                string Fdata = "Last game by player " + PLID + "\n";
+                Fdata += "Transactions:\n";
+                for (string transaction : games[PLID].transactions) {
+                  Fdata += "  " + transaction + "\n";
+                }
+                Fdata += "\nSolved: " + games[PLID].current_word + "\n";
 
-              int Fsize = Fdata.length();
+                int Fsize = Fdata.length();
 
-              response +=
-                  string("ACT " + Fname + " " + to_string(Fsize) + " " + Fdata);
+                response += string("ACT " + Fname + " " + to_string(Fsize) +
+                                   " " + Fdata);
+              }
             } else {
-              // TODO no ongoing game mas já houve um jogo, most recent state
               response += "FIN";
             }
           } else {
-            response += "NOK"; // TODO espaço a mais
+            response += "NOK";
           }
 
           int n;
