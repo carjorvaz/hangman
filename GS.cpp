@@ -17,6 +17,17 @@
 #include <vector>
 using namespace std;
 
+// TODO projeto:
+// - fazer autoavaliação
+// - correr testes do servidor
+// - fazer makefile
+// - fazer readme
+//   - dizer que estamos à espera dos ficheiros de hint na pasta hints
+//
+// - fazer TODOs
+// - reler o enunciado todo
+// - update ao scoreboard
+
 // TODOs:
 // - começar um jogo quando já está um a decorrer está partido?
 // - ir buscar mais palavras?
@@ -30,6 +41,7 @@ struct Game {
   int errors;
   int trial;
   set<char> letters;
+  set<string> guessed_words;
 };
 
 struct Message {
@@ -308,6 +320,61 @@ int main(int argc, char **argv) {
           // TODO ERR PLID Inválido
         }
       } else if (keyword == string("PWG")) {
+        string response = "RWG ";
+        string PLID = message_struct.message[1];
+        // TODO ERR caso a syntax do PWG seja inválida
+        // TODO ERR quando não há jogo
+
+        if (is_valid_PLID(PLID)) {
+          string guess_str = message_struct.message[2];
+
+          if (guess_str.length() == games[PLID].word.length()) {
+            for (int i = 0; i < guess_str.length(); i++) {
+              if (!isalpha(guess_str[i])) {
+                response += "ERR\n"; // TODO confirmar
+                break;
+              }
+            }
+
+            string trial_str = message_struct.message[3];
+            int trial = stoi(trial_str);
+
+            games[PLID].trial++;
+            // TODO ERR se não forem iguais
+
+            if (guess_str == games[PLID].word) {
+              response += "WIN " + to_string(trial);
+              games.erase(PLID);
+            } else if (games[PLID].guessed_words.count(guess_str) > 0) {
+              response += "DUP " + to_string(trial);
+              games[PLID].trial--;
+            } else if (guess_str != games[PLID].word &&
+                       games[PLID].max_errors - games[PLID].errors > 0) {
+              response += "NOK " + to_string(trial);
+              games[PLID].errors++;
+              games[PLID].guessed_words.insert(guess_str);
+            } else if (guess_str != games[PLID].word &&
+                       games[PLID].max_errors - games[PLID].errors <= 0) {
+              response += "OVR " + to_string(trial);
+              games.erase(PLID);
+            } else if (trial !=
+                       games[PLID].trial + 1) { // TODO incompleto, falta o "ou"
+              response +=
+                  "INV" +
+                  to_string(
+                      trial); // trial inválida - confirmar, not sure do + 1
+            }
+
+            // TODO trials; afinal trials das letras e das palavras são
+            // diferentes?
+            // TODO tirar trial dos ifs e passar para baixo
+
+            send_message(response, res_udp, fd_udp, message_struct.addr, false);
+
+          } else {
+            // TODO ERR
+          }
+        }
       } else if (keyword == string("QUT")) {
         string PLID = message_struct.message[1];
         if (is_valid_PLID(PLID)) {
@@ -343,7 +410,7 @@ int main(int argc, char **argv) {
         if (keyword == string("GSB")) {
           string response = string("RSB ");
 
-          if (scoreboard.size() <= 3) { // TODO mudar para 4
+          if (scoreboard.size() <= 4) {
             response +=
                 string("EMPTY "); // TODO não é suposto haver espaço no fim mas
                                   // read_word do player está à espera de um
@@ -378,11 +445,82 @@ int main(int argc, char **argv) {
 
               bytes_written += n;
             }
+
+            // TODO apagar e tirar is_tcp do send_message
+            // send_message(response, res_udp, fd_udp, message_struct.addr,
+            // false);
+          }
+        } else if (keyword == string("GHL")) {
+          string response = string("RHL ");
+          string PLID = message_struct.message[1];
+          if (is_valid_PLID(PLID)) {
+            string Fname = games[PLID].hint_file;
+            string Fdata = "";
+
+            ifstream file("hints/" + Fname, std::ios::binary);
+            ostringstream stream;
+            stream << file.rdbuf();
+            Fdata = string(stream.str());
+            int Fsize = Fdata.length();
+
+            response +=
+                string("OK " + Fname + " " + to_string(Fsize) + " " + Fdata);
+          } else {
+            response += "NOK";
           }
 
-          // TODO apagar e tirar is_tcp do send_message
-          // send_message(response, res_udp, fd_udp, message_struct.addr,
-          // false);
+          int n;
+          ssize_t bytes_written = 0;
+          while (true) {
+            n = write(player_fd, response.c_str() + bytes_written,
+                      response.length() - bytes_written);
+            if (n == -1) {
+              cout << "An error occurred." << endl;
+              exit(1);
+            } else if (n == 0) {
+              break;
+            }
+
+            bytes_written += n;
+          }
+        } else if (keyword == string("STA")) {
+          string response = string("RST ");
+          string PLID = message_struct.message[1];
+          if (is_valid_PLID(PLID)) {
+            if (games.find(PLID) != games.end()) {
+              string Fname = "STATE_" + PLID + ".txt"; // TODO
+              string Fdata = "Active game found for player " + PLID + "\nGame started - ";
+              // TODO if transactions... else "no transactions found"
+              Fdata += "\nSolved so far: " + games[PLID].current_word + "\n";
+
+              // TODO guardar todas as jogadas do player (vector<string>) e mostrar aqui
+
+              int Fsize = Fdata.length();
+
+              response +=
+                  string("ACT " + Fname + " " + to_string(Fsize) + " " + Fdata);
+            } else {
+              // TODO no ongoing game mas já houve um jogo, most recent state
+              response += "FIN";
+            }
+          } else {
+            response += "NOK"; // TODO espaço a mais
+          }
+
+          int n;
+          ssize_t bytes_written = 0;
+          while (true) {
+            n = write(player_fd, response.c_str() + bytes_written,
+                      response.length() - bytes_written);
+            if (n == -1) {
+              cout << "An error occurred." << endl;
+              exit(1);
+            } else if (n == 0) {
+              break;
+            }
+
+            bytes_written += n;
+          }
         }
 
         close(player_fd);

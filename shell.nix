@@ -5,6 +5,7 @@ with pkgs;
 mkShell {
   buildInputs = [
     gcc
+    gnumake
     netcat-openbsd
   ];
 }

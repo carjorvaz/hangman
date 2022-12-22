@@ -27,6 +27,8 @@ using namespace std;
  * Se houver tempo, fazer o comando exit quando se faz ^C.
  */
 
+// TODO não incluir shell.nix na entrega
+// TODO arranjar mail do prof, para a submissão
 // TODO timer udp, se houver tempo
 // TODO terminal codes estão a aparecer nas mensagens; se houver tempo, garantir que as mensagens acabam sempre em \n
 // TODO apagar debug no send_message
@@ -77,7 +79,7 @@ string read_word(int fd) {
     }
 
     // TODO ver se é preciso ver outras coisas (whitespace) -> não é
-    if (buffer_tcp[0] == ' ') {
+    if (buffer_tcp[0] == ' ' || buffer_tcp[0] == '\n') {
       break;
     } else {
       word += buffer_tcp[0];
