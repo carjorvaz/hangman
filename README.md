@@ -31,3 +31,7 @@ Start the client by running the `player` binary:
 ## Notes
 
 The server expects the hint files (images hinting at the words to be guessed) to be under the `hints/` directory.
+
+## Credits
+
+Work done in pair-programming with [Mafalda Ribeiro](https://github.com/mafrib).
