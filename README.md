@@ -28,6 +28,14 @@ Start the client by running the `player` binary:
 
 ...and start playing!
 
+Available player commands are:
+* `start <player_id>`, where `<player_id>` must be a 6-digit number.
+* `play <letter>` to guess a letter.
+* `guess <word>` to guess the entire word.
+* `hint` to receive a hint image.
+* `quit` to quit the current game.
+* `exit` to quit the current game and exit the client.
+
 ## Notes
 
 The server expects the hint files (images hinting at the words to be guessed) to be under the `hints/` directory.
